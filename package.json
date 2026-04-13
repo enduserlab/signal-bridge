@@ -1,0 +1,20 @@
+{
+	"name": "signal-bridge",
+	"version": "0.1.0",
+	"description": "Companion service for the Signal Inbox Obsidian plugin. Receives Signal messages via signal-cli and writes them as markdown files into your vault.",
+	"main": "dist/index.js",
+	"type": "module",
+	"scripts": {
+		"build": "tsc",
+		"start": "node dist/index.js",
+		"dev": "tsx watch src/index.ts"
+	},
+	"keywords": ["signal", "obsidian", "bridge", "signal-cli"],
+	"author": "End User",
+	"license": "MIT",
+	"devDependencies": {
+		"@types/node": "^22.0.0",
+		"tsx": "^4.0.0",
+		"typescript": "^5.8.0"
+	}
+}
