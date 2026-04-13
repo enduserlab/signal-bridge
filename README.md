@@ -1,6 +1,6 @@
 # Signal Bridge
 
-Companion service for the [Signal Inbox](https://github.com/danielquinn/signal-inbox) Obsidian plugin. Receives Signal messages via signal-cli and writes them as markdown files into your vault's inbox folder.
+Companion service for the [Signal Inbox](https://github.com/enduserlab/signal-inbox) Obsidian plugin. Receives Signal messages via signal-cli and writes them as markdown files into your vault's inbox folder.
 
 Also supports **bidirectional commands** — text `/help` to yourself on Signal to search your vault, check status, and save quick notes.
 
