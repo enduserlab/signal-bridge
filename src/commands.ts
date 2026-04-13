@@ -1,258 +1,285 @@
-import { execFile } from "node:child_process";
-import { readdirSync, readFileSync } from "node:fs";
-import { join } from "node:path";
-import { promisify } from "node:util";
-import type { BridgeConfig, SignalMessage } from "./types.js";
-
-const execFileAsync = promisify(execFile);
-
-/** Command prefix — messages starting with this are treated as commands. */
-const CMD_PREFIX = "/";
+import { type App, TFile, TFolder, normalizePath } from "obsidian";
+import { execFile } from "child_process";
+import type { SignalBridgeSettings, SignalMessage } from "./types";
 
 /**
- * Check if a message is a command (outgoing message starting with /).
+ * Handles slash commands sent to yourself via Signal (Note to Self).
  */
-export function isCommand(message: SignalMessage): boolean {
-	return message.isOutgoing && message.body.trim().startsWith(CMD_PREFIX);
-}
+export class CommandHandler {
+	private app: App;
+	private settings: SignalBridgeSettings;
 
-/**
- * Handle a command message. Returns the response text to send back.
- */
-export async function handleCommand(
-	message: SignalMessage,
-	config: BridgeConfig
-): Promise<string> {
-	const raw = message.body.trim().slice(CMD_PREFIX.length).trim();
-	const spaceIndex = raw.indexOf(" ");
-	const cmd = spaceIndex === -1 ? raw.toLowerCase() : raw.slice(0, spaceIndex).toLowerCase();
-	const args = spaceIndex === -1 ? "" : raw.slice(spaceIndex + 1).trim();
-
-	switch (cmd) {
-		case "help":
-			return formatHelp();
-		case "search":
-		case "find":
-			return searchVault(args, config);
-		case "recent":
-			return listRecent(config, parseInt(args) || 5);
-		case "status":
-			return getStatus(config);
-		case "note":
-		case "save":
-			return saveNote(args, config);
-		default:
-			return `Unknown command: /${cmd}\n\nType /help for available commands.`;
+	constructor(app: App, settings: SignalBridgeSettings) {
+		this.app = app;
+		this.settings = settings;
 	}
-}
 
-/**
- * Send a response back via signal-cli.
- */
-export async function sendResponse(
-	text: string,
-	recipientNumber: string,
-	config: BridgeConfig
-): Promise<void> {
-	try {
-		await execFileAsync(config.signalCli.path, [
-			"--config", config.signalCli.configDir,
-			"-a", config.signalCli.account,
-			"send",
-			"-m", text,
-			recipientNumber,
-		], { timeout: 30_000 });
-	} catch (err) {
-		console.error(`[ERROR] Failed to send response: ${err}`);
+	updateSettings(settings: SignalBridgeSettings): void {
+		this.settings = settings;
 	}
-}
 
-/**
- * Send a response to yourself (Note to Self).
- */
-export async function sendSelfResponse(
-	text: string,
-	config: BridgeConfig
-): Promise<void> {
-	await sendResponse(text, config.signalCli.account, config);
-}
+	/** Check if a message is a command (outgoing + starts with /). */
+	isCommand(message: SignalMessage): boolean {
+		return (
+			this.settings.enableCommands &&
+			message.isOutgoing &&
+			message.body.trim().startsWith("/")
+		);
+	}
 
-// --- Command implementations ---
+	/** Handle a command and send the response back via Signal. */
+	async handle(message: SignalMessage): Promise<void> {
+		const raw = message.body.trim().slice(1).trim();
+		const spaceIdx = raw.indexOf(" ");
+		const cmd = spaceIdx === -1 ? raw.toLowerCase() : raw.slice(0, spaceIdx).toLowerCase();
+		const args = spaceIdx === -1 ? "" : raw.slice(spaceIdx + 1).trim();
 
-function formatHelp(): string {
-	return [
-		"Signal Inbox Commands:",
-		"",
-		"/search <query> — Search your vault for matching messages",
-		"/recent [n] — Show the n most recent classified messages (default 5)",
-		"/status — Show bridge and inbox stats",
-		"/note <text> — Save a quick note to the inbox",
-		"/help — Show this message",
-	].join("\n");
-}
-
-function searchVault(query: string, config: BridgeConfig): string {
-	if (!query) return "Usage: /search <query>";
-
-	const results: Array<{ file: string; line: string }> = [];
-	const vaultRoot = config.vault.inboxPath.replace(/_inbox\/signal\/?$/, "");
-
-	// Search across common vault folders
-	const searchDirs = [
-		"_inbox/processed",
-		"inbox",
-		"wiki",
-	];
-
-	for (const dir of searchDirs) {
-		const fullDir = join(vaultRoot, dir);
-		try {
-			searchDir(fullDir, query.toLowerCase(), results);
-		} catch {
-			// Directory may not exist
+		let response: string;
+		switch (cmd) {
+			case "help":
+				response = this.helpText();
+				break;
+			case "search":
+			case "find":
+				response = await this.search(args);
+				break;
+			case "recent":
+				response = await this.listRecent(parseInt(args) || 5);
+				break;
+			case "status":
+				response = this.getStatus();
+				break;
+			case "note":
+			case "save":
+				response = await this.saveNote(args);
+				break;
+			default:
+				response = `Unknown command: /${cmd}\n\nType /help for available commands.`;
 		}
+
+		await this.sendSelfResponse(response);
 	}
 
-	if (results.length === 0) {
-		return `No results for "${query}"`;
+	// --- Commands ---
+
+	private helpText(): string {
+		return [
+			"Signal Bridge Commands:",
+			"",
+			"/search <query> - Search your vault",
+			"/recent [n] - Show n most recent classified messages (default 5)",
+			"/status - Bridge and inbox stats",
+			"/note <text> - Save a quick note to the inbox",
+			"/help - Show this message",
+		].join("\n");
 	}
 
-	const display = results.slice(0, 8).map((r, i) =>
-		`${i + 1}. ${r.file}\n   ${r.line}`
-	);
+	private async search(query: string): Promise<string> {
+		if (!query) return "Usage: /search <query>";
 
-	return [
-		`Found ${results.length} match${results.length === 1 ? "" : "es"} for "${query}":`,
-		"",
-		...display,
-		results.length > 8 ? `\n...and ${results.length - 8} more` : "",
-	].join("\n");
-}
+		const results: Array<{ file: string; line: string }> = [];
+		const q = query.toLowerCase();
 
-function searchDir(
-	dir: string,
-	query: string,
-	results: Array<{ file: string; line: string }>
-): void {
-	let entries;
-	try {
-		entries = readdirSync(dir, { withFileTypes: true });
-	} catch {
-		return;
+		for (const dir of this.settings.searchFolders) {
+			const folder = this.app.vault.getAbstractFileByPath(
+				normalizePath(dir)
+			);
+			if (!(folder instanceof TFolder)) continue;
+
+			await this.searchFolder(folder, q, results);
+			if (results.length >= 20) break;
+		}
+
+		if (results.length === 0) {
+			return `No results for "${query}"`;
+		}
+
+		const display = results.slice(0, 8).map(
+			(r, i) => `${i + 1}. ${r.file}\n   ${r.line}`
+		);
+
+		return [
+			`Found ${results.length} match${results.length === 1 ? "" : "es"} for "${query}":`,
+			"",
+			...display,
+			results.length > 8
+				? `\n...and ${results.length - 8} more`
+				: "",
+		].join("\n");
 	}
 
-	for (const entry of entries) {
-		const fullPath = join(dir, entry.name);
-		if (entry.isDirectory()) {
-			searchDir(fullPath, query, results);
-		} else if (entry.name.endsWith(".md")) {
-			try {
-				const content = readFileSync(fullPath, "utf-8");
+	private async searchFolder(
+		folder: TFolder,
+		query: string,
+		results: Array<{ file: string; line: string }>
+	): Promise<void> {
+		for (const child of folder.children) {
+			if (results.length >= 20) return;
+
+			if (child instanceof TFolder) {
+				await this.searchFolder(child, query, results);
+			} else if (child instanceof TFile && child.extension === "md") {
+				const content = await this.app.vault.read(child);
 				if (content.toLowerCase().includes(query)) {
-					// Find the matching line for context
-					const lines = content.split("\n");
-					const matchLine = lines.find((l) =>
-						l.toLowerCase().includes(query)
-					);
+					const matchLine = content
+						.split("\n")
+						.find((l) => l.toLowerCase().includes(query));
 					results.push({
-						file: entry.name.replace(/\.md$/, ""),
+						file: child.basename,
 						line: (matchLine ?? "").trim().slice(0, 80),
 					});
 				}
-			} catch {
-				// Skip unreadable files
 			}
 		}
 	}
-}
 
-function listRecent(config: BridgeConfig, count: number): string {
-	const vaultRoot = config.vault.inboxPath.replace(/_inbox\/signal\/?$/, "");
-	const processedDir = join(vaultRoot, "_inbox/processed");
+	private async listRecent(count: number): Promise<string> {
+		const processed = this.app.vault.getAbstractFileByPath(
+			normalizePath("_inbox/processed")
+		);
+		if (!(processed instanceof TFolder)) {
+			return "No processed messages found yet.";
+		}
 
-	let files: Array<{ name: string; mtime: number }> = [];
-	try {
-		const entries = readdirSync(processedDir, { withFileTypes: true });
-		files = entries
-			.filter((e) => e.isFile() && e.name.endsWith(".md"))
-			.map((e) => {
-				const stat = require("node:fs").statSync(join(processedDir, e.name));
-				return { name: e.name, mtime: stat.mtimeMs };
-			})
-			.sort((a, b) => b.mtime - a.mtime)
+		const files = processed.children
+			.filter((f): f is TFile => f instanceof TFile && f.extension === "md")
+			.sort((a, b) => b.stat.mtime - a.stat.mtime)
 			.slice(0, count);
-	} catch {
-		return "No processed messages found yet.";
+
+		if (files.length === 0) {
+			return "No processed messages found yet.";
+		}
+
+		const lines: string[] = [];
+		for (let i = 0; i < files.length; i++) {
+			const content = await this.app.vault.read(files[i]);
+			const summary =
+				this.extractField(content, "signal-inbox-summary") ??
+				files[i].basename;
+			const category =
+				this.extractField(content, "signal-inbox-category") ?? "?";
+			lines.push(`${i + 1}. [${category}] ${summary}`);
+		}
+
+		return ["Recent messages:", "", ...lines].join("\n");
 	}
 
-	if (files.length === 0) {
-		return "No processed messages found yet.";
+	private getStatus(): string {
+		const inboxFolder = this.app.vault.getAbstractFileByPath(
+			normalizePath(this.settings.inboxPath)
+		);
+		const processedFolder = this.app.vault.getAbstractFileByPath(
+			normalizePath("_inbox/processed")
+		);
+
+		const inboxCount =
+			inboxFolder instanceof TFolder
+				? inboxFolder.children.filter(
+						(f) => f instanceof TFile && f.extension === "md"
+					).length
+				: 0;
+
+		const processedCount =
+			processedFolder instanceof TFolder
+				? processedFolder.children.filter(
+						(f) => f instanceof TFile && f.extension === "md"
+					).length
+				: 0;
+
+		return [
+			"Signal Bridge Status:",
+			`  Inbox: ${inboxCount} pending`,
+			`  Processed: ${processedCount} classified`,
+			`  Account: ${this.settings.signalAccount}`,
+			`  Groups: ${this.settings.includeGroupMessages ? "included" : "excluded"}`,
+		].join("\n");
 	}
 
-	const lines = files.map((f, i) => {
-		const content = readFileSync(join(processedDir, f.name), "utf-8");
-		const summary = extractFrontmatterField(content, "signal-inbox-summary") ?? f.name;
-		const category = extractFrontmatterField(content, "signal-inbox-category") ?? "?";
-		return `${i + 1}. [${category}] ${summary}`;
-	});
+	private async saveNote(text: string): Promise<string> {
+		if (!text) return "Usage: /note <your note text>";
 
-	return [`Recent messages:`, "", ...lines].join("\n");
-}
+		await this.ensureFolder(this.settings.inboxPath);
 
-function getStatus(config: BridgeConfig): string {
-	let inboxCount = 0;
-	let processedCount = 0;
-	const vaultRoot = config.vault.inboxPath.replace(/_inbox\/signal\/?$/, "");
+		const now = new Date();
+		const ts = now.toISOString().replace(/[:.]/g, "").slice(0, 15);
+		const filename = `${ts}_quick-note.md`;
+		const filePath = normalizePath(
+			`${this.settings.inboxPath}/${filename}`
+		);
 
-	try {
-		inboxCount = readdirSync(config.vault.inboxPath)
-			.filter((f) => f.endsWith(".md")).length;
-	} catch { /* empty */ }
+		const content = [
+			"---",
+			`sender: "You"`,
+			`source: "${this.escapeYaml(this.settings.signalAccount)}"`,
+			`timestamp: ${now.getTime()}`,
+			`date: "${now.toISOString()}"`,
+			`type: "signal-command"`,
+			"---",
+			"",
+			"# Quick Note",
+			"",
+			text,
+			"",
+		].join("\n");
 
-	try {
-		processedCount = readdirSync(join(vaultRoot, "_inbox/processed"))
-			.filter((f) => f.endsWith(".md")).length;
-	} catch { /* empty */ }
+		await this.app.vault.create(filePath, content);
+		return "Saved note to inbox.";
+	}
 
-	return [
-		"Signal Inbox Status:",
-		`  Inbox: ${inboxCount} pending`,
-		`  Processed: ${processedCount} classified`,
-		`  Account: ${config.signalCli.account}`,
-		`  Groups: ${config.includeGroupMessages ? "included" : "excluded"}`,
-	].join("\n");
-}
+	// --- Signal response ---
 
-function saveNote(text: string, config: BridgeConfig): string {
-	if (!text) return "Usage: /note <your note text>";
+	private async sendSelfResponse(text: string): Promise<void> {
+		const args: string[] = [];
+		if (this.settings.signalConfigDir) {
+			args.push("--config", this.settings.signalConfigDir);
+		}
+		args.push(
+			"-a", this.settings.signalAccount,
+			"send",
+			"-m", text,
+			this.settings.signalAccount
+		);
 
-	const { writeFileSync } = require("node:fs");
-	const now = new Date();
-	const ts = now.toISOString().replace(/[:.]/g, "").slice(0, 15);
-	const filename = `${ts}_quick-note.md`;
-	const filepath = join(config.vault.inboxPath, filename);
+		return new Promise((resolve) => {
+			execFile(
+				this.settings.signalCliPath,
+				args,
+				{ timeout: 30_000 },
+				(err) => {
+					if (err) {
+						console.error("Signal Bridge: Failed to send response:", err.message);
+					}
+					resolve();
+				}
+			);
+		});
+	}
 
-	const content = [
-		"---",
-		`sender: "You"`,
-		`source: "${config.signalCli.account}"`,
-		`timestamp: ${now.getTime()}`,
-		`date: "${now.toISOString()}"`,
-		`type: "signal-command"`,
-		"---",
-		"",
-		"# Quick Note",
-		"",
-		text,
-		"",
-	].join("\n");
+	// --- Helpers ---
 
-	writeFileSync(filepath, content, "utf-8");
-	return `Saved note to inbox.`;
-}
+	private extractField(content: string, field: string): string | null {
+		const regex = new RegExp(`^${field}:\\s*"?([^"\\n]*)"?`, "m");
+		const match = content.match(regex);
+		return match?.[1]?.trim() ?? null;
+	}
 
-function extractFrontmatterField(content: string, field: string): string | null {
-	const regex = new RegExp(`^${field}:\\s*"?([^"\\n]*)"?`, "m");
-	const match = content.match(regex);
-	return match?.[1]?.trim() ?? null;
+	private escapeYaml(s: string): string {
+		return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+	}
+
+	private async ensureFolder(path: string): Promise<void> {
+		const normalized = normalizePath(path);
+		const existing = this.app.vault.getAbstractFileByPath(normalized);
+		if (existing instanceof TFolder) return;
+
+		const parts = normalized.split("/");
+		let current = "";
+		for (const part of parts) {
+			current = current ? `${current}/${part}` : part;
+			const folder = this.app.vault.getAbstractFileByPath(current);
+			if (!folder) {
+				await this.app.vault.createFolder(current);
+			}
+		}
+	}
 }

@@ -1,86 +1,76 @@
 # Signal Bridge
 
-Companion service for the [Signal Inbox](https://github.com/enduserlab/signal-inbox) Obsidian plugin. Receives Signal messages via signal-cli and writes them as markdown files into your vault's inbox folder.
+Obsidian plugin that receives Signal messages via [signal-cli](https://github.com/AsamK/signal-cli) and writes them as markdown notes into your vault. Works as a companion to the [Signal Inbox](https://github.com/enduserlab/signal-inbox) plugin for automatic classification.
 
-Also supports **bidirectional commands** — text `/help` to yourself on Signal to search your vault, check status, and save quick notes.
+Also supports **bidirectional commands** — text `/help` to yourself on Signal to search your vault, check status, and save quick notes from anywhere.
 
 ## Prerequisites
 
-- **Node.js 18+**
 - **signal-cli 0.13+** installed and linked ([github.com/AsamK/signal-cli](https://github.com/AsamK/signal-cli))
 - **Java 21+** (required by signal-cli)
 
-## Quick start
+## Setup
+
+### 1. Install signal-cli
 
 ```bash
-# 1. Install signal-cli
 brew install signal-cli    # macOS
+# or download from https://github.com/AsamK/signal-cli/releases
+```
 
-# 2. Link as a secondary device (safe — like adding Signal Desktop)
-signal-cli link -n "obsidian-bridge"
+### 2. Install Java (if needed)
+
+```bash
+brew install openjdk@21
+```
+
+### 3. Link as a secondary device
+
+This is safe — it's the same as adding Signal Desktop.
+
+```bash
+signal-cli link -n "Obsidian"
 # Scan the QR code on your phone: Signal → Settings → Linked Devices
-
-# 3. Set up the bridge
-cd signal-bridge
-npm install
-cp config.example.json config.json
-# Edit config.json with your phone number and vault path
-
-# 4. Build and run
-npm run build
-npm start
 ```
 
-## Configuration
+### 4. Configure the plugin
 
-```json
-{
-  "signalCli": {
-    "path": "signal-cli",
-    "account": "+1234567890",
-    "configDir": "~/.local/share/signal-cli"
-  },
-  "vault": {
-    "inboxPath": "/path/to/your/vault/_inbox/signal",
-    "attachmentPath": "/path/to/your/vault/_inbox/attachments"
-  },
-  "includeGroupMessages": true,
-  "logLevel": "info"
-}
+Open **Settings → Signal Bridge** in Obsidian:
+- Enter your phone number
+- Verify the signal-cli path
+- Set your inbox folder (default: `_inbox/signal`)
+
+The bridge starts automatically. You'll see "Signal: Listening" in the status bar.
+
+## How it works
+
+```
+Signal → signal-cli → plugin → vault markdown
+                                     ↓
+                            Signal Inbox plugin
+                                     ↓
+                          classified & filed notes
 ```
 
-| Field | Description |
-|-------|-------------|
-| `signalCli.path` | Path to signal-cli binary |
-| `signalCli.account` | Your Signal phone number |
-| `signalCli.configDir` | signal-cli data directory |
-| `vault.inboxPath` | Where to write message markdown files |
-| `vault.attachmentPath` | Where to copy Signal attachments (images, files, voice) |
-| `includeGroupMessages` | Whether to capture group messages |
-| `logLevel` | `debug`, `info`, `warn`, or `error` |
+1. **Signal Bridge** polls signal-cli for new messages
+2. Each message becomes a markdown file with YAML frontmatter
+3. **Signal Inbox** (optional companion plugin) picks them up, classifies with Claude, and files them
 
 ## Commands
 
-Text these to yourself on Signal (Note to Self) while the bridge is running:
+Text these to yourself on Signal (Note to Self):
 
 | Command | Description |
 |---------|-------------|
 | `/help` | Show available commands |
-| `/search <query>` | Search your vault for matching messages |
+| `/search <query>` | Search your vault for matching notes |
 | `/recent [n]` | Show the n most recent classified messages |
 | `/status` | Show bridge and inbox stats |
 | `/note <text>` | Save a quick note to the inbox |
 
 ## Output format
 
-Each message becomes a markdown file:
-
-```
-2026-04-12_200000_Alice.md
-2026-04-12_200130_FamilyChat_Bob.md
-```
-
-With rich YAML frontmatter:
+Each message becomes a markdown file with rich frontmatter:
 
 ```yaml
 ---
@@ -95,81 +85,38 @@ has-attachments: true
 attachment-types:
   - "image/jpeg"
 ---
+
+# Message from Alice
+
+Check out this article: https://example.com/article
 ```
 
-The Signal Inbox Obsidian plugin picks these up and handles classification.
+Filename format: `Sender - YYYY-MM-DD - HHMMSS.md`
 
-## Deployment
+## Settings
 
-### Local (same machine as Obsidian)
+| Setting | Default | Description |
+|---------|---------|-------------|
+| Signal account | — | Your phone number in international format |
+| signal-cli path | `signal-cli` | Path to the signal-cli binary |
+| Config directory | auto-detect | signal-cli data directory |
+| Inbox folder | `_inbox/signal` | Where incoming messages are written |
+| Attachment folder | `_inbox/attachments` | Where media files are stored |
+| Auto-start | on | Start listening when Obsidian launches |
+| Group messages | on | Capture messages from Signal groups |
+| Poll interval | 5s | How often to check for new messages |
+| Commands | on | Respond to /commands via Note to Self |
 
-Just run the bridge. It writes directly to your vault.
+## Network disclosure
 
-```bash
-npm start
-```
-
-### systemd service (Linux/server)
-
-```ini
-# /etc/systemd/system/signal-bridge.service
-[Unit]
-Description=Signal Bridge for Obsidian
-After=network.target
-
-[Service]
-Type=simple
-User=yourusername
-WorkingDirectory=/opt/signal-bridge
-ExecStart=/usr/bin/node dist/index.js /opt/signal-bridge/config.json
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-```
-
-```bash
-sudo systemctl enable --now signal-bridge
-```
-
-### launchd (macOS)
-
-```xml
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>Label</key>
-    <string>com.user.signal-bridge</string>
-    <key>ProgramArguments</key>
-    <array>
-        <string>/usr/local/bin/node</string>
-        <string>/opt/signal-bridge/dist/index.js</string>
-        <string>/opt/signal-bridge/config.json</string>
-    </array>
-    <key>RunAtLoad</key>
-    <true/>
-    <key>KeepAlive</key>
-    <true/>
-    <key>StandardOutPath</key>
-    <string>/tmp/signal-bridge.log</string>
-    <key>StandardErrorPath</key>
-    <string>/tmp/signal-bridge.err</string>
-</dict>
-</plist>
-```
-
-Save to `~/Library/LaunchAgents/com.user.signal-bridge.plist` and load with:
-
-```bash
-launchctl load ~/Library/LaunchAgents/com.user.signal-bridge.plist
-```
+This plugin spawns **signal-cli** as a local process to communicate with the Signal network. It does not make any other network requests. All message data stays on your machine.
 
 ## Development
 
 ```bash
-npm run dev    # watch mode with tsx
+npm install
+npm run dev    # watch mode
+npm run build  # production build
 ```
 
 ## License

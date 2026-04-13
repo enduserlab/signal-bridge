@@ -1,105 +1,125 @@
-import { mkdirSync, writeFileSync, copyFileSync, existsSync } from "node:fs";
-import { join, basename, extname } from "node:path";
-import type { BridgeConfig, SignalMessage, SignalAttachment } from "./types.js";
+import { type App, TFolder, normalizePath } from "obsidian";
+import { readFileSync, existsSync } from "fs";
+import { join, extname } from "path";
+import { homedir } from "os";
+import type { SignalBridgeSettings, SignalMessage, SignalAttachment } from "./types";
 
 /**
- * Writes Signal messages as markdown files into the Obsidian vault inbox.
- * Handles attachments by copying them from signal-cli's store.
+ * Writes Signal messages as markdown files into the vault.
+ * Uses Obsidian's vault API for all in-vault operations
+ * and Node fs for reading from signal-cli's external storage.
  */
 export class MessageWriter {
-	private config: BridgeConfig;
+	private app: App;
+	private settings: SignalBridgeSettings;
 
-	constructor(config: BridgeConfig) {
-		this.config = config;
-		mkdirSync(config.vault.inboxPath, { recursive: true });
-		mkdirSync(config.vault.attachmentPath, { recursive: true });
+	constructor(app: App, settings: SignalBridgeSettings) {
+		this.app = app;
+		this.settings = settings;
+	}
+
+	updateSettings(settings: SignalBridgeSettings): void {
+		this.settings = settings;
 	}
 
 	/**
 	 * Write a Signal message as a markdown file in the vault inbox.
-	 * Returns the path of the created file.
+	 * Returns the vault path of the created file.
 	 */
-	write(message: SignalMessage): string {
+	async write(message: SignalMessage): Promise<string> {
+		await this.ensureFolder(this.settings.inboxPath);
+
 		const filename = this.buildFilename(message);
-		const attachmentLinks = this.copyAttachments(message);
-		const markdown = this.buildMarkdown(message, attachmentLinks);
+		const attachmentEmbeds = await this.copyAttachments(message);
+		const markdown = this.buildMarkdown(message, attachmentEmbeds);
 
-		const filepath = this.deduplicatePath(this.config.vault.inboxPath, filename);
-		writeFileSync(filepath, markdown, "utf-8");
+		const filePath = this.deduplicatePath(this.settings.inboxPath, filename);
+		await this.app.vault.create(filePath, markdown);
 
-		this.log("info", `Wrote: ${basename(filepath)}`);
-		return filepath;
+		return filePath;
 	}
 
-	/**
-	 * Build a filename from the message sender and timestamp.
-	 * Format: "Sender - 2026-04-12 - pending.md"
-	 * The signal-inbox plugin renames with the topic after classification.
-	 */
+	// --- Filename ---
+
 	private buildFilename(message: SignalMessage): string {
 		const date = new Date(message.timestamp);
 		const dateStr = date.toISOString().slice(0, 10);
 		const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "");
 
 		const sender = this.cleanName(message.senderName);
-		const group = message.groupName ? `${this.cleanName(message.groupName)} - ` : "";
+		const group = message.groupName
+			? `${this.cleanName(message.groupName)} - `
+			: "";
 
-		// Include time suffix for uniqueness within the same sender+day
 		return `${sender} - ${dateStr} - ${group}${timeStr}.md`;
 	}
 
-	/**
-	 * Copy attachments from signal-cli's storage into the vault.
-	 * Returns markdown-formatted links/embeds for each attachment.
-	 */
-	private copyAttachments(message: SignalMessage): string[] {
-		const links: string[] = [];
+	private cleanName(name: string): string {
+		return name
+			.replace(/[^a-zA-Z0-9 _-]/g, "")
+			.replace(/\s+/g, " ")
+			.trim()
+			.slice(0, 30);
+	}
+
+	// --- Attachments ---
+
+	private async copyAttachments(message: SignalMessage): Promise<string[]> {
+		if (message.attachments.length === 0) return [];
+
+		await this.ensureFolder(this.settings.attachmentPath);
+		const embeds: string[] = [];
 
 		for (const att of message.attachments) {
 			const sourcePath = this.findAttachmentFile(att);
 			if (!sourcePath) {
-				this.log("warn", `Attachment not found: ${att.id}`);
-				links.push(`> [Attachment not found: ${att.id}]`);
+				embeds.push(`> [Attachment not found: ${att.id}]`);
 				continue;
 			}
-
-			const ext = this.getExtension(att);
-			const destName = `${att.id}${ext}`;
-			const destPath = join(this.config.vault.attachmentPath, destName);
 
 			try {
-				copyFileSync(sourcePath, destPath);
-			} catch (err) {
-				this.log("warn", `Failed to copy attachment ${att.id}: ${err}`);
-				links.push(`> [Failed to copy attachment: ${att.id}]`);
-				continue;
-			}
+				const ext = this.getExtension(att);
+				const destName = `${att.id}${ext}`;
+				const destPath = normalizePath(
+					`${this.settings.attachmentPath}/${destName}`
+				);
 
-			// Build Obsidian-style embed or link
-			const relPath = `${basename(this.config.vault.attachmentPath)}/${destName}`;
-			if (att.contentType.startsWith("image/")) {
-				links.push(`![[${relPath}]]`);
-			} else if (att.contentType.startsWith("audio/")) {
-				links.push(`![[${relPath}]] *(voice message)*`);
-			} else if (att.contentType.startsWith("video/")) {
-				links.push(`![[${relPath}]] *(video)*`);
-			} else {
-				links.push(`[[${relPath}|${att.filename ?? destName}]]`);
+				// Read from signal-cli storage (outside vault) via Node fs,
+				// write into vault via Obsidian adapter
+				const data = readFileSync(sourcePath);
+				await this.app.vault.adapter.writeBinary(
+					destPath,
+					data.buffer.slice(
+						data.byteOffset,
+						data.byteOffset + data.byteLength
+					)
+				);
+
+				// Build Obsidian-style embed
+				if (att.contentType.startsWith("image/")) {
+					embeds.push(`![[${destPath}]]`);
+				} else if (att.contentType.startsWith("audio/")) {
+					embeds.push(`![[${destPath}]] *(voice message)*`);
+				} else if (att.contentType.startsWith("video/")) {
+					embeds.push(`![[${destPath}]] *(video)*`);
+				} else {
+					embeds.push(
+						`[[${destPath}|${att.filename ?? destName}]]`
+					);
+				}
+			} catch {
+				embeds.push(`> [Failed to copy attachment: ${att.id}]`);
 			}
 		}
 
-		return links;
+		return embeds;
 	}
 
-	/**
-	 * Look for the attachment file in signal-cli's storage.
-	 */
 	private findAttachmentFile(att: SignalAttachment): string | null {
-		const attachDir = join(this.config.signalCli.configDir, "attachments");
-		// signal-cli stores attachments with their ID as filename
+		const configDir = this.resolveSignalConfigDir();
+		const attachDir = join(configDir, "attachments");
 		const candidate = join(attachDir, att.id);
 		if (existsSync(candidate)) return candidate;
-		// Sometimes includes the original extension
 		if (att.filename) {
 			const withName = join(attachDir, att.filename);
 			if (existsSync(withName)) return withName;
@@ -107,10 +127,38 @@ export class MessageWriter {
 		return null;
 	}
 
-	/**
-	 * Build the full markdown content for a message.
-	 */
-	private buildMarkdown(message: SignalMessage, attachmentLinks: string[]): string {
+	private resolveSignalConfigDir(): string {
+		if (this.settings.signalConfigDir) {
+			return this.settings.signalConfigDir.replace(/^~/, homedir());
+		}
+		return join(homedir(), ".local", "share", "signal-cli");
+	}
+
+	private getExtension(att: SignalAttachment): string {
+		if (att.filename) {
+			const ext = extname(att.filename);
+			if (ext) return ext;
+		}
+		const map: Record<string, string> = {
+			"image/jpeg": ".jpg",
+			"image/png": ".png",
+			"image/gif": ".gif",
+			"image/webp": ".webp",
+			"audio/aac": ".aac",
+			"audio/mpeg": ".mp3",
+			"audio/ogg": ".ogg",
+			"video/mp4": ".mp4",
+			"application/pdf": ".pdf",
+		};
+		return map[att.contentType] ?? "";
+	}
+
+	// --- Markdown ---
+
+	private buildMarkdown(
+		message: SignalMessage,
+		attachmentEmbeds: string[]
+	): string {
 		const date = new Date(message.timestamp);
 
 		const fm: Record<string, string | number | boolean | string[]> = {
@@ -132,10 +180,11 @@ export class MessageWriter {
 		}
 		if (message.attachments.length > 0) {
 			fm["has-attachments"] = true;
-			fm["attachment-types"] = [...new Set(message.attachments.map(a => a.contentType))];
+			fm["attachment-types"] = [
+				...new Set(message.attachments.map((a) => a.contentType)),
+			];
 		}
 
-		// Extract URLs from body for the plugin to analyze
 		const urls = this.extractUrls(message.body);
 		if (urls.length > 0) {
 			fm["urls"] = urls;
@@ -144,101 +193,67 @@ export class MessageWriter {
 		const yamlLines = Object.entries(fm).map(([key, value]) => {
 			if (Array.isArray(value)) {
 				if (value.length === 0) return `${key}: []`;
-				return `${key}:\n${value.map(v => `  - "${v}"`).join("\n")}`;
+				return `${key}:\n${value.map((v) => `  - "${this.escapeYaml(String(v))}"`).join("\n")}`;
 			}
-			if (typeof value === "string") return `${key}: "${this.escapeYaml(value)}"`;
+			if (typeof value === "string")
+				return `${key}: "${this.escapeYaml(value)}"`;
 			return `${key}: ${value}`;
 		});
 
-		// Build heading
 		const direction = message.isOutgoing ? "to" : "from";
 		const target = message.groupName
 			? `${message.groupName} (${direction} ${message.senderName})`
 			: message.senderName;
 		const heading = `# Message ${direction} ${target}`;
 
-		// Build body sections
 		const sections: string[] = [heading, ""];
-
 		if (message.body) {
 			sections.push(message.body);
 		}
-
-		if (attachmentLinks.length > 0) {
+		if (attachmentEmbeds.length > 0) {
 			if (message.body) sections.push("");
 			sections.push("## Attachments", "");
-			sections.push(...attachmentLinks);
+			sections.push(...attachmentEmbeds);
 		}
 
 		return `---\n${yamlLines.join("\n")}\n---\n\n${sections.join("\n")}\n`;
 	}
 
-	/**
-	 * Extract URLs from message text.
-	 */
 	private extractUrls(text: string): string[] {
 		const urlRegex = /https?:\/\/[^\s<>"{}|\\^`[\]]+/g;
 		return [...(text.match(urlRegex) ?? [])];
 	}
 
-	/**
-	 * Escape special characters for YAML string values.
-	 */
 	private escapeYaml(s: string): string {
 		return s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 	}
 
-	/**
-	 * Get a file extension from an attachment's content type or filename.
-	 */
-	private getExtension(att: SignalAttachment): string {
-		if (att.filename) {
-			const ext = extname(att.filename);
-			if (ext) return ext;
-		}
-		const map: Record<string, string> = {
-			"image/jpeg": ".jpg",
-			"image/png": ".png",
-			"image/gif": ".gif",
-			"image/webp": ".webp",
-			"audio/aac": ".aac",
-			"audio/mpeg": ".mp3",
-			"audio/ogg": ".ogg",
-			"video/mp4": ".mp4",
-			"application/pdf": ".pdf",
-		};
-		return map[att.contentType] ?? "";
-	}
+	// --- Helpers ---
 
-	/**
-	 * Clean a string for use in filenames.
-	 */
-	private cleanName(name: string): string {
-		return name
-			.replace(/[^a-zA-Z0-9_-]/g, "_")
-			.replace(/_+/g, "_")
-			.slice(0, 30);
-	}
-
-	/**
-	 * Generate a unique file path, adding a numeric suffix if needed.
-	 */
-	private deduplicatePath(dir: string, filename: string): string {
+	private deduplicatePath(folder: string, filename: string): string {
 		const base = filename.replace(/\.md$/, "");
-		let candidate = join(dir, filename);
+		let candidate = normalizePath(`${folder}/${filename}`);
 		let i = 1;
-		while (existsSync(candidate)) {
-			candidate = join(dir, `${base}_${i}.md`);
+		while (this.app.vault.getAbstractFileByPath(candidate)) {
+			candidate = normalizePath(`${folder}/${base} ${i}.md`);
 			i++;
 		}
 		return candidate;
 	}
 
-	private log(level: string, msg: string): void {
-		const levels = ["debug", "info", "warn", "error"];
-		if (levels.indexOf(level) >= levels.indexOf(this.config.logLevel)) {
-			const ts = new Date().toISOString();
-			console.log(`[${ts}] [${level.toUpperCase()}] ${msg}`);
+	private async ensureFolder(path: string): Promise<void> {
+		const normalized = normalizePath(path);
+		const existing = this.app.vault.getAbstractFileByPath(normalized);
+		if (existing instanceof TFolder) return;
+
+		const parts = normalized.split("/");
+		let current = "";
+		for (const part of parts) {
+			current = current ? `${current}/${part}` : part;
+			const folder = this.app.vault.getAbstractFileByPath(current);
+			if (!folder) {
+				await this.app.vault.createFolder(current);
+			}
 		}
 	}
 }

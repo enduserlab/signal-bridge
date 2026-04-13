@@ -1,24 +1,42 @@
-/** Bridge configuration loaded from config.json. */
-export interface BridgeConfig {
-	signalCli: {
-		/** Path to signal-cli binary */
-		path: string;
-		/** Your Signal account phone number (e.g. "+1234567890") */
-		account: string;
-		/** signal-cli data directory (default: ~/.local/share/signal-cli) */
-		configDir: string;
-	};
-	vault: {
-		/** Absolute path to the inbox folder in your vault */
-		inboxPath: string;
-		/** Absolute path for storing attachments (images, files, voice) */
-		attachmentPath: string;
-	};
-	/** Whether to capture group messages (default: true) */
+// --- Plugin settings ---
+
+export interface SignalBridgeSettings {
+	/** Path to signal-cli binary. */
+	signalCliPath: string;
+	/** Your Signal account phone number (e.g. "+1234567890"). */
+	signalAccount: string;
+	/** signal-cli data directory. Leave blank for auto-detect. */
+	signalConfigDir: string;
+	/** Vault-relative path to the inbox folder. */
+	inboxPath: string;
+	/** Vault-relative path for storing attachments. */
+	attachmentPath: string;
+	/** Whether to capture group messages. */
 	includeGroupMessages: boolean;
-	/** Log level: "debug" | "info" | "warn" | "error" */
-	logLevel: "debug" | "info" | "warn" | "error";
+	/** How often to poll for new messages (seconds). */
+	pollIntervalSeconds: number;
+	/** Start listening when the plugin loads. */
+	autoStart: boolean;
+	/** Whether to handle /commands sent to yourself. */
+	enableCommands: boolean;
+	/** Folders to search when running /search command. */
+	searchFolders: string[];
 }
+
+export const DEFAULT_SETTINGS: SignalBridgeSettings = {
+	signalCliPath: "signal-cli",
+	signalAccount: "",
+	signalConfigDir: "",
+	inboxPath: "_inbox/signal",
+	attachmentPath: "_inbox/attachments",
+	includeGroupMessages: true,
+	pollIntervalSeconds: 5,
+	autoStart: true,
+	enableCommands: true,
+	searchFolders: ["_inbox/processed", "inbox", "wiki"],
+};
+
+// --- Signal types ---
 
 /** A Signal attachment from signal-cli JSON output. */
 export interface SignalAttachment {
@@ -32,30 +50,20 @@ export interface SignalAttachment {
 
 /** A parsed Signal message ready to be written to the vault. */
 export interface SignalMessage {
-	/** Sender's phone number */
 	source: string;
-	/** Sender's profile name (if available) */
 	senderName: string;
-	/** Message timestamp (ms since epoch) */
 	timestamp: number;
-	/** Message body text (may be empty for attachment-only messages) */
 	body: string;
-	/** Attachments on this message */
 	attachments: SignalAttachment[];
-	/** Group ID if this is a group message */
 	groupId: string | null;
-	/** Group name if available */
 	groupName: string | null;
-	/** Whether this is a message we sent (synced from another device) */
 	isOutgoing: boolean;
 }
 
 /**
  * Raw envelope shape from signal-cli JSON output.
- * signal-cli daemon mode wraps this in JSON-RPC:
- *   {"jsonrpc":"2.0","method":"receive","params":{"envelope":{...}}}
- * signal-cli receive mode outputs it directly:
- *   {"envelope":{...}}
+ * JSON-RPC: {"jsonrpc":"2.0","method":"receive","params":{"envelope":{...}}}
+ * Plain:    {"envelope":{...}}
  */
 export interface SignalEnvelope {
 	source?: string;

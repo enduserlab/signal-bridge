@@ -1,0 +1,10 @@
+{
+	"id": "signal-bridge",
+	"name": "Signal Bridge",
+	"version": "0.1.0",
+	"minAppVersion": "1.5.0",
+	"description": "Receives Signal messages via signal-cli and writes them as markdown notes into your vault.",
+	"author": "End User",
+	"authorUrl": "https://enduser.dev",
+	"isDesktopOnly": true
+}
