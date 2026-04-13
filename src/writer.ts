@@ -32,29 +32,20 @@ export class MessageWriter {
 	}
 
 	/**
-	 * Build a filename from the message timestamp and sender.
-	 * Format: 2026-04-12_200000_Alice.md
+	 * Build a filename from the message sender and timestamp.
+	 * Format: "Sender - 2026-04-12 - pending.md"
+	 * The signal-inbox plugin renames with the topic after classification.
 	 */
 	private buildFilename(message: SignalMessage): string {
 		const date = new Date(message.timestamp);
-		const y = date.getFullYear();
-		const mo = String(date.getMonth() + 1).padStart(2, "0");
-		const d = String(date.getDate()).padStart(2, "0");
-		const h = String(date.getHours()).padStart(2, "0");
-		const mi = String(date.getMinutes()).padStart(2, "0");
-		const s = String(date.getSeconds()).padStart(2, "0");
+		const dateStr = date.toISOString().slice(0, 10);
+		const timeStr = date.toISOString().slice(11, 19).replace(/:/g, "");
 
-		// Clean sender name for filesystem
-		const sender = message.senderName
-			.replace(/[^a-zA-Z0-9_-]/g, "_")
-			.replace(/_+/g, "_")
-			.slice(0, 30);
+		const sender = this.cleanName(message.senderName);
+		const group = message.groupName ? `${this.cleanName(message.groupName)} - ` : "";
 
-		const prefix = message.groupName
-			? `${y}-${mo}-${d}_${h}${mi}${s}_${this.cleanName(message.groupName)}_${sender}`
-			: `${y}-${mo}-${d}_${h}${mi}${s}_${sender}`;
-
-		return `${prefix}.md`;
+		// Include time suffix for uniqueness within the same sender+day
+		return `${sender} - ${dateStr} - ${group}${timeStr}.md`;
 	}
 
 	/**
