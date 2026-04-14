@@ -14,7 +14,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 		containerEl.empty();
 
 		// --- signal-cli ---
-		new Setting(containerEl).setName("signal-cli").setHeading();
+		new Setting(containerEl).setName("Connection").setHeading();
 
 		new Setting(containerEl)
 			.setName("Signal account")
@@ -30,13 +30,13 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("signal-cli path")
+			.setName("CLI binary path")
 			.setDesc(
-				"Path to the signal-cli binary. Use just \"signal-cli\" if it's on your PATH."
+				"Path to the CLI binary. Use just \"signal-cli\" if it's on your system PATH."
 			)
 			.addText((text) =>
 				text
-					.setPlaceholder("signal-cli")
+					.setPlaceholder("Enter path")
 					.setValue(this.plugin.settings.signalCliPath)
 					.onChange(async (value) => {
 						this.plugin.settings.signalCliPath = value || "signal-cli";
@@ -47,7 +47,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("Config directory")
 			.setDesc(
-				"signal-cli data directory. Leave blank to auto-detect (~/.local/share/signal-cli)."
+				"Data directory for the CLI. Leave blank to auto-detect."
 			)
 			.addText((text) =>
 				text
@@ -64,7 +64,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Inbox folder")
-			.setDesc("Where incoming messages are written. The Signal Inbox plugin watches this folder.")
+			.setDesc("Where incoming messages are written as markdown files.")
 			.addText((text) =>
 				text
 					.setPlaceholder("_inbox/signal")
@@ -105,7 +105,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Include group messages")
-			.setDesc("Capture messages from Signal groups in addition to direct messages.")
+			.setDesc("Capture group messages in addition to direct messages.")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.includeGroupMessages)
@@ -117,7 +117,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Poll interval (seconds)")
-			.setDesc("How often to check signal-cli for new messages.")
+			.setDesc("How often to check for new messages.")
 			.addSlider((slider) =>
 				slider
 					.setLimits(3, 60, 1)
@@ -133,7 +133,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("Commands").setHeading();
 
 		new Setting(containerEl)
-			.setName("Enable Signal commands")
+			.setName("Enable commands")
 			.setDesc(
 				"Respond to slash commands sent to yourself via Signal (Note to Self). " +
 				"Commands: /help, /search, /recent, /status, /note."
@@ -163,7 +163,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 							.filter(Boolean);
 						await this.plugin.saveSettings();
 					});
-				text.inputEl.style.width = "100%";
+				text.inputEl.addClass("signal-bridge-wide-input");
 			});
 
 		// --- Setup guide ---
@@ -175,7 +175,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 				el.appendText("Java 21+ and signal-cli 0.13+");
 				el.createEl("br");
 				el.createEl("br");
-				el.createEl("strong", { text: "1. Install signal-cli" });
+				el.createEl("strong", { text: "1. Install the CLI" });
 				el.createEl("br");
 				el.createEl("code", { text: "brew install signal-cli" });
 				el.appendText(" (macOS) or download from GitHub");
@@ -193,7 +193,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 				el.appendText("Enter your phone number above and start the bridge.");
 				el.createEl("br");
 				el.createEl("br");
-				el.createEl("strong", { text: "4. Install Signal Inbox plugin" });
+				el.createEl("strong", { text: "4. Install the companion inbox plugin" });
 				el.createEl("br");
 				el.appendText("For automatic classification, install the companion Signal Inbox plugin.");
 			})

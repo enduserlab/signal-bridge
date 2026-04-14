@@ -37,20 +37,20 @@ export default class SignalBridgePlugin extends Plugin {
 		// Ribbon icon
 		this.addRibbonIcon(
 			"radio",
-			"Signal Bridge: Toggle listening",
-			async () => {
+			"Toggle listening",
+			() => {
 				if (this.listening) {
 					this.stopListening();
-					new Notice("Signal Bridge: Stopped");
+					new Notice("Stopped.");
 				} else {
 					if (!this.settings.signalAccount) {
 						new Notice(
-							"Signal Bridge: Set your Signal account in settings first."
+							"Set your account in settings first."
 						);
 						return;
 					}
 					this.startListening();
-					new Notice("Signal Bridge: Listening for messages...");
+					new Notice("Listening for messages...");
 				}
 			}
 		);
@@ -62,17 +62,17 @@ export default class SignalBridgePlugin extends Plugin {
 			name: "Start listening",
 			callback: () => {
 				if (this.listening) {
-					new Notice("Signal Bridge: Already listening.");
+					new Notice("Already listening.");
 					return;
 				}
 				if (!this.settings.signalAccount) {
 					new Notice(
-						"Signal Bridge: Set your Signal account in settings first."
+						"Set your account in settings first."
 					);
 					return;
 				}
 				this.startListening();
-				new Notice("Signal Bridge: Listening for messages...");
+				new Notice("Listening for messages...");
 			},
 		});
 
@@ -81,11 +81,11 @@ export default class SignalBridgePlugin extends Plugin {
 			name: "Stop listening",
 			callback: () => {
 				if (!this.listening) {
-					new Notice("Signal Bridge: Not currently listening.");
+					new Notice("Not currently listening.");
 					return;
 				}
 				this.stopListening();
-				new Notice("Signal Bridge: Stopped.");
+				new Notice("Stopped.");
 			},
 		});
 

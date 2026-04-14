@@ -134,7 +134,7 @@ export class SignalListener {
 			}
 
 			if (messages.length > 0) {
-				this.processSequentially(messages);
+				void this.processSequentially(messages);
 			}
 		});
 	}
