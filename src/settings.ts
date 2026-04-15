@@ -32,7 +32,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("CLI binary path")
 			.setDesc(
-				"Path to the CLI binary. Use just \"signal-cli\" if it's on your system PATH."
+				"Path to the binary, or just \"signal-cli\" if installed globally."
 			)
 			.addText((text) =>
 				text
@@ -64,7 +64,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Inbox folder")
-			.setDesc("Where incoming messages are written as markdown files.")
+			.setDesc("Folder for incoming messages.")
 			.addText((text) =>
 				text
 					.setPlaceholder("_inbox/signal")
@@ -177,13 +177,15 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 				el.createEl("br");
 				el.createEl("strong", { text: "1. Install the CLI" });
 				el.createEl("br");
-				el.createEl("code", { text: "brew install signal-cli" });
+				const brewCmd = el.createEl("code");
+				brewCmd.appendText("brew install signal-cli");
 				el.appendText(" (macOS) or download from GitHub");
 				el.createEl("br");
 				el.createEl("br");
 				el.createEl("strong", { text: "2. Link as a secondary device" });
 				el.createEl("br");
-				el.createEl("code", { text: 'signal-cli link -n "Obsidian"' });
+				const linkCmd = el.createEl("code");
+				linkCmd.appendText('signal-cli link -n "Obsidian"');
 				el.createEl("br");
 				el.appendText("Scan the QR code: Signal \u2192 Settings \u2192 Linked Devices");
 				el.createEl("br");
