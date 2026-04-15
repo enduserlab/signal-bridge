@@ -32,7 +32,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 		new Setting(containerEl)
 			.setName("CLI binary path")
 			.setDesc(
-				"Path to the binary, or just \"signal-cli\" if installed globally."
+				"Absolute path to the signal-cli binary, or just signal-cli if installed globally."
 			)
 			.addText((text) =>
 				text
