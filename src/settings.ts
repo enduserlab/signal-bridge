@@ -30,11 +30,11 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("Signal-cli path")
-			.setDesc("Path to the signal-cli executable on disk.")
+			.setName("CLI binary path")
+			.setDesc("Absolute path to the command line binary.")
 			.addText((text) =>
 				text
-					.setPlaceholder("Example: /usr/local/bin/signal-cli")
+					.setPlaceholder("/usr/local/bin/signal-cli")
 					.setValue(this.plugin.settings.signalCliPath)
 					.onChange(async (value) => {
 						this.plugin.settings.signalCliPath = value || "signal-cli";
@@ -44,10 +44,10 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Config directory")
-			.setDesc("Data directory for signal-cli — leave blank to auto-detect.")
+			.setDesc("Data directory for the CLI — leave blank to auto-detect.")
 			.addText((text) =>
 				text
-					.setPlaceholder("Example: ~/.local/share/signal-cli")
+					.setPlaceholder("~/.local/share/signal-cli")
 					.setValue(this.plugin.settings.signalConfigDir)
 					.onChange(async (value) => {
 						this.plugin.settings.signalConfigDir = value;
@@ -130,7 +130,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Enable commands")
-			.setDesc("Respond to slash commands (/help, /search, /recent, /status, /note) sent to yourself via Signal.")
+			.setDesc("Respond to slash commands sent to yourself via Signal.")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.enableCommands)
