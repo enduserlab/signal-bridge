@@ -30,13 +30,11 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 			);
 
 		new Setting(containerEl)
-			.setName("CLI binary path")
-			.setDesc(
-				"Absolute path to the signal-cli binary, or just signal-cli if installed globally."
-			)
+			.setName("Signal-cli path")
+			.setDesc("Path to the signal-cli executable on disk.")
 			.addText((text) =>
 				text
-					.setPlaceholder("Enter path")
+					.setPlaceholder("Example: /usr/local/bin/signal-cli")
 					.setValue(this.plugin.settings.signalCliPath)
 					.onChange(async (value) => {
 						this.plugin.settings.signalCliPath = value || "signal-cli";
@@ -46,12 +44,10 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Config directory")
-			.setDesc(
-				"Data directory for the CLI. Leave blank to auto-detect."
-			)
+			.setDesc("Data directory for signal-cli — leave blank to auto-detect.")
 			.addText((text) =>
 				text
-					.setPlaceholder("Auto-detect")
+					.setPlaceholder("Example: ~/.local/share/signal-cli")
 					.setValue(this.plugin.settings.signalConfigDir)
 					.onChange(async (value) => {
 						this.plugin.settings.signalConfigDir = value;
@@ -134,10 +130,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Enable commands")
-			.setDesc(
-				"Respond to slash commands sent to yourself via Signal (Note to Self). " +
-				"Commands: /help, /search, /recent, /status, /note."
-			)
+			.setDesc("Respond to slash commands (/help, /search, /recent, /status, /note) sent to yourself via Signal.")
 			.addToggle((toggle) =>
 				toggle
 					.setValue(this.plugin.settings.enableCommands)
@@ -149,9 +142,7 @@ export class SignalBridgeSettingTab extends PluginSettingTab {
 
 		new Setting(containerEl)
 			.setName("Search folders")
-			.setDesc(
-				"Vault folders to search when using /search. Comma-separated, relative to vault root."
-			)
+			.setDesc("Comma-separated vault folders searched by the /search command.")
 			.addText((text) => {
 				text
 					.setPlaceholder("_inbox/processed, inbox, wiki")
